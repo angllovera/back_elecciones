@@ -205,3 +205,20 @@ export class AuthService {
     }));
   }
 }
+
+export async function getResults(token: string) {
+  const response = await fetch('http://localhost:3000/votes/results', {
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    throw new Error(data.message || 'Error al obtener resultados');
+  }
+
+  return data;
+}
