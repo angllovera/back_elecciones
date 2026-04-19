@@ -1,9 +1,8 @@
-import { Injectable, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { createHash } from 'crypto';
 import { Repository } from 'typeorm';
 import { Block } from './entities/block.entity';
-import { NotFoundException } from '@nestjs/common';
 
 @Injectable()
 export class BlockchainService implements OnModuleInit {
@@ -213,6 +212,12 @@ export class BlockchainService implements OnModuleInit {
   }
 
   async tamperBlock(blockId: number, newData: Record<string, any>) {
+    if (process.env.NODE_ENV !== 'development') {
+      throw new BadRequestException(
+        'La alteración manual de bloques solo está habilitada en desarrollo',
+      );
+    }
+
     const block = await this.blockRepository.findOne({
       where: { id: blockId },
     });
