@@ -3,11 +3,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
+import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
+import { DataSource, Repository } from 'typeorm';
+import { BlockchainService } from '../blockchain/blockchain.service';
 import { Candidate } from '../candidates/entities/candidate.entity';
 import { User } from '../users/entities/user.entity';
 import { Role } from '../users/enums/role.enum';
-import { Repository } from 'typeorm';
 import { CreateVoteDto } from './dto/create-vote.dto';
 import { Vote } from './entities/vote.entity';
 
@@ -22,6 +23,11 @@ export class VotesService {
 
     @InjectRepository(Candidate)
     private readonly candidateRepository: Repository<Candidate>,
+
+    @InjectDataSource()
+    private readonly dataSource: DataSource,
+
+    private readonly blockchainService: BlockchainService,
   ) {}
 
   async createVote(userId: number, createVoteDto: CreateVoteDto) {
@@ -54,22 +60,55 @@ export class VotesService {
       throw new BadRequestException('El votante ya emitió su voto');
     }
 
-    const vote = this.voteRepository.create({
-      voter,
-      candidate,
-    });
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
 
-    const savedVote = await this.voteRepository.save(vote);
+    try {
+      const vote = queryRunner.manager.create(Vote, {
+        voter,
+        candidate,
+      });
 
-    return {
-      message: 'Voto registrado correctamente',
-      vote: {
-        id: savedVote.id,
-        voterId: savedVote.voter.id,
-        candidateId: savedVote.candidate.id,
-        createdAt: savedVote.createdAt,
-      },
-    };
+      const savedVote = await queryRunner.manager.save(Vote, vote);
+
+      const block = await this.blockchainService.addBlock({
+        voteId: savedVote.id,
+        voterId: voter.id,
+        candidateId: candidate.id,
+        candidateNombre: candidate.nombre,
+        partido: candidate.partido,
+        emittedAt: savedVote.createdAt,
+      });
+
+      await queryRunner.commitTransaction();
+
+      return {
+        message: 'Voto registrado correctamente',
+        vote: {
+          id: savedVote.id,
+          voterId: voter.id,
+          candidateId: candidate.id,
+          createdAt: savedVote.createdAt,
+        },
+        blockchain: {
+          blockId: block.id,
+          index: block.index,
+          hash: block.hash,
+          previousHash: block.previousHash,
+          nonce: block.nonce,
+          difficulty: block.difficulty,
+        },
+      };
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      console.error('Error al registrar voto y bloque:', error);
+      throw new BadRequestException(
+        'No se pudo registrar el voto correctamente',
+      );
+    } finally {
+      await queryRunner.release();
+    }
   }
 
   async getMyVote(userId: number) {
